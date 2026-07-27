@@ -536,7 +536,7 @@
     <h3>알림</h3>
     <p class="sub" id="pendingApprovalMsg">승인 확인 요청건이 있습니다.</p>
     <div style="display:flex;justify-content:flex-end;margin-top:14px;">
-      <button class="btn btn-primary" data-close>확인</button>
+      <button class="btn btn-primary" onclick="goToPendingApprovalTab()">확인</button>
     </div>
   </div>
 </div>
@@ -1903,23 +1903,33 @@ function describeSignFlow(signFlow){
 /* 로그인한 사람(기술책임자/품질책임자/최고경영자)의 서명 차례가 된 대기 건이 있는지 확인해 팝업으로 알린다.
    대기 건: 이 기록의 결재선에 role이 포함되어 있고, 아직 본인이 서명하지 않았으며, 앞선 결재자가 모두 서명을 마쳐
    지금 바로 본인 차례가 된 경우만 센다. */
-function countMyTurnPendingRecords(role){
+function getMyTurnPendingRecords(role){
   return state.records.filter(r=>{
     const flowRoles = getSignFlowRoles(r);
     if(!flowRoles.includes(role)) return false;
     if(r.signRoles && r.signRoles[role]) return false;
     return blockingPrecedingRole(r, role) === null;
-  }).length;
+  });
 }
+let pendingApprovalTargetTpl = null;
 function checkPendingApprovalPopup(){
+  pendingApprovalTargetTpl = null;
   if(!fbProfile || !fbProfile.role) return;
   if(!['reviewer','approver','manager'].includes(fbProfile.role)) return;
-  const count = countMyTurnPendingRecords(fbProfile.role);
-  if(count > 0){
-    $('pendingApprovalMsg').textContent = `승인 확인 요청건이 있습니다. (${count}건)`;
+  const recs = getMyTurnPendingRecords(fbProfile.role);
+  if(recs.length > 0){
+    /* 여러 양식에 걸쳐 대기 건이 있으면, 탭 순서상 '양식 관리'와 가장 가까운(=가장 왼쪽) 작성 기록 탭으로 이동 */
+    const pendingTplIds = new Set(recs.map(r=>r.templateId));
+    const orderedTplIds = getSortedTemplates().map(t=>t.id);
+    pendingApprovalTargetTpl = orderedTplIds.find(id=> pendingTplIds.has(id)) || null;
+    $('pendingApprovalMsg').textContent = `승인 확인 요청건이 있습니다. (${recs.length}건)`;
     openModal('modal-pending-approval');
   }
 }
+window.goToPendingApprovalTab = ()=>{
+  closeModal('modal-pending-approval');
+  if(pendingApprovalTargetTpl) goToRecordsTab(pendingApprovalTargetTpl);
+};
 function blockingPrecedingRole(r, role){
   const flowRoles = getSignFlowRoles(r);
   const idx = flowRoles.indexOf(role);
