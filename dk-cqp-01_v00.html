@@ -530,6 +530,17 @@
 </div>
 
 <!-- 결재선 보기 팝업 (양식명 클릭 시) -->
+<div class="overlay" id="modal-pending-approval">
+  <div class="modal" style="max-width:360px;">
+    <button class="modal-close" data-close>×</button>
+    <h3>알림</h3>
+    <p class="sub" id="pendingApprovalMsg">승인 확인 요청건이 있습니다.</p>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px;">
+      <button class="btn btn-primary" data-close>확인</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="modal-signflow-view">
   <div class="modal" style="max-width:360px;">
     <button class="modal-close" data-close>×</button>
@@ -886,6 +897,7 @@ async function onFbAuthChanged(user){
       $('refreshBtn').style.display='inline-flex';
       $('userLine').textContent = 'CALIBRATION DOCUMENT REGISTRY · 연결됨';
       await bootstrap();
+      checkPendingApprovalPopup();
     }catch(e){
       console.error(e); toast('서명자 정보를 불러오지 못했습니다');
     }
@@ -1888,6 +1900,26 @@ function describeSignFlow(signFlow){
 }
 /* role이 지금 서명할 차례인지 확인. 결재선(flowRoles) 배열의 순서를 그대로 서명 순서로 사용한다.
    반환값: null이면 서명 가능, 아니면 아직 완료되지 않은 "선행 역할" 문자열을 반환 */
+/* 로그인한 사람(기술책임자/품질책임자/최고경영자)의 서명 차례가 된 대기 건이 있는지 확인해 팝업으로 알린다.
+   대기 건: 이 기록의 결재선에 role이 포함되어 있고, 아직 본인이 서명하지 않았으며, 앞선 결재자가 모두 서명을 마쳐
+   지금 바로 본인 차례가 된 경우만 센다. */
+function countMyTurnPendingRecords(role){
+  return state.records.filter(r=>{
+    const flowRoles = getSignFlowRoles(r);
+    if(!flowRoles.includes(role)) return false;
+    if(r.signRoles && r.signRoles[role]) return false;
+    return blockingPrecedingRole(r, role) === null;
+  }).length;
+}
+function checkPendingApprovalPopup(){
+  if(!fbProfile || !fbProfile.role) return;
+  if(!['reviewer','approver','manager'].includes(fbProfile.role)) return;
+  const count = countMyTurnPendingRecords(fbProfile.role);
+  if(count > 0){
+    $('pendingApprovalMsg').textContent = `승인 확인 요청건이 있습니다. (${count}건)`;
+    openModal('modal-pending-approval');
+  }
+}
 function blockingPrecedingRole(r, role){
   const flowRoles = getSignFlowRoles(r);
   const idx = flowRoles.indexOf(role);
