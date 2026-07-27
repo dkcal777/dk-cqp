@@ -698,8 +698,9 @@
 <div class="overlay" id="modal-editrec">
   <div class="modal">
     <button class="modal-close" data-close>×</button>
-    <h3>비고 / 등록일자 수정</h3>
+    <h3>제목 / 비고 / 등록일자 수정</h3>
     <p class="sub" id="editrecSub"></p>
+    <div class="field"><label>제목</label><input type="text" id="editrecTitle"></div>
     <div class="field"><label>등록일자</label><input type="date" id="editrecDate"></div>
     <div class="field"><label>비고</label><textarea id="editrecMemo" placeholder="고객명 / 장비명 / 특이사항 (선택)"></textarea></div>
     <div class="modal-actions">
@@ -2175,7 +2176,7 @@ function renderRecords(){
       return `<tr>
         <td>${statusCellHtml}</td>
         <td>${isAdminUser(fbUser)
-              ? `<div class="rec-title" style="cursor:pointer;" title="클릭하여 등록일자/비고 수정" onclick="openEditRecModal('${r.id}')">${escapeHtml(r.title)}</div>`
+              ? `<div class="rec-title" style="cursor:pointer;" title="클릭하여 제목/등록일자/비고 수정" onclick="openEditRecModal('${r.id}')">${escapeHtml(r.title)}</div>`
               : `<div class="rec-title">${escapeHtml(r.title)}</div>`}${r.memo?`<div class="rec-memo">${escapeHtml(r.memo)}</div>`:''}</td>
         <td class="rec-date">${fmtDate(r.createdAt)}</td>
         <td>${fileLinks}</td>
@@ -2369,7 +2370,9 @@ let editRecTargetId = null;
 window.openEditRecModal = (recId)=>{
   if(!isAdminUser(fbUser)){ toast('등록일자/비고 수정은 최상위 관리자만 가능합니다'); return; }
   editRecTargetId = recId; const r = state.records.find(x=>x.id===recId);
-  $('editrecSub').textContent = `"${r.title}"`;
+  const tpl = getTpl(r.templateId);
+  $('editrecSub').textContent = tpl ? tpl.name : '';
+  $('editrecTitle').value = r.title || '';
   const d = new Date(r.createdAt);
   const pad = n => String(n).padStart(2,'0');
   $('editrecDate').value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
@@ -2378,9 +2381,12 @@ window.openEditRecModal = (recId)=>{
 };
 $('saveEditRecBtn').addEventListener('click', async ()=>{
   const r = state.records.find(x=>x.id===editRecTargetId);
+  const newTitle = $('editrecTitle').value.trim();
   const newMemo = $('editrecMemo').value.trim();
   const newDateVal = $('editrecDate').value;
+  if(!newTitle){ toast('제목을 입력하세요'); return; }
   closeModal('modal-editrec'); setSync('busy','저장 중...');
+  r.title = newTitle;
   r.memo = newMemo;
   if(newDateVal){
     const orig = new Date(r.createdAt);
@@ -2390,7 +2396,7 @@ $('saveEditRecBtn').addEventListener('click', async ()=>{
     r.createdAt = updated.toISOString();
   }
   await saveMetadata(); renderRecords();
-  toast('비고/등록일자가 수정되었습니다');
+  toast('제목/비고/등록일자가 수정되었습니다');
 });
 
 /* 서명본 삭제 권한:
