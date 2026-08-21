@@ -360,10 +360,10 @@
       <div class="hint">
         Firebase 콘솔 → 프로젝트 설정 → 일반 → "내 앱"에서 나오는 firebaseConfig 값을 <b>JSON 형식(따옴표 포함)</b>으로 붙여넣으세요.<br>
         Authentication에서 Google 로그인 방법을 사용 설정하고, Firestore Database를 생성해야 합니다.<br>
-        신규 가입자는 승인 전까지 로그인할 수 없으며, 관리자(dkcal33@gmail.com) 계정으로 로그인하면 이 설정 화면 아래에
+        신규 가입자는 승인 전까지 로그인할 수 없으며, 관리자(hih1009@naver.com) 계정으로 로그인하면 이 설정 화면 아래에
         "가입 승인 대기" 목록이 나타나 여기서 역할을 지정하고 승인할 수 있습니다. (Firebase 콘솔 → Firestore →
         <code>signers</code> 컬렉션에서 직접 <code>role</code> / <code>status</code> 필드를 수정해도 됩니다.)<br>
-        <code>role</code> 필드를 <code>master</code>로 지정하면 그 계정도 최상위 관리자 권한(서명 완료 기록의 삭제·파일추가·서명본 교체 등)을 갖습니다. dkcal33@gmail.com 계정은 로그인 시 자동으로 <code>master</code>가 부여됩니다.
+        <code>role</code> 필드를 <code>master</code>로 지정하면 그 계정도 최상위 관리자 권한(서명 완료 기록의 삭제·파일추가·서명본 교체 등)을 갖습니다. hih1009@naver.com 계정은 로그인 시 자동으로 <code>master</code>가 부여됩니다.
       </div>
     </div>
     <div class="field" id="pendingSignersSection" style="display:none;">
@@ -432,15 +432,14 @@
       <div class="hint" id="fbEmailAuthMsg"></div>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-primary" id="fbEmailSignInBtn">이메일로 로그인</button>
-      <button class="btn" id="fbEmailSignUpBtn">계정 만들기</button>
+      <button class="btn btn-primary" id="fbEmailSignInBtn" style="width:100%;">이메일로 로그인</button>
     </div>
     <div class="field" style="margin-top:6px;">
       <button class="btn-ghost btn-sm" id="fbForgotPwBtn" type="button" style="text-decoration:underline;padding:0;">비밀번호를 잊으셨나요? 재설정 이메일 받기</button>
     </div>
     <div class="hint" style="margin-top:10px;">
-      처음 인증하는 분은 [계정 만들기]로 이메일/비밀번호를 등록하세요. 등록 즉시 사용할 수 있는 것이 아니라,
-      관리자(dkcal33@gmail.com) 승인 후에 [이메일로 로그인]으로 사용할 수 있습니다.<br>
+      이메일 계정은 자율 가입을 받지 않습니다. 이메일 계정이 필요하면 관리자에게 요청해 계정을 먼저 만든 뒤,
+      [비밀번호를 잊으셨나요?]로 본인 비밀번호를 설정하고 [이메일로 로그인]을 이용하세요.<br>
       비밀번호는 Firebase Authentication에 안전하게 저장되며, 이 앱이나 관리자도 확인할 수 없습니다.
     </div>
   </div>
@@ -800,7 +799,10 @@ const $ = (id) => document.getElementById(id);
 
 /* ========================= 상태/설정 ========================= */
 
-let ROOT_FOLDER_NAME = localStorage.getItem('cqm_folder_name') || 'DK-CQP-01';
+/* 이 파일 전용 고정 저장 폴더명입니다. 26개 절차서 파일이 같은 브라우저(같은 origin)에서 열리면
+   localStorage를 공유하므로, 예전에 다른 절차서 파일에서 저장한 값이 섞여 들어올 수 있습니다.
+   그런 문제를 막기 위해 localStorage를 참조하지 않고 이 값을 항상 그대로 사용합니다. */
+let ROOT_FOLDER_NAME = 'DK-CQP-01';
 let PARENT_FOLDER_ID = localStorage.getItem('cqm_parent_folder_id') || '';
 
 let SIGN_IMAGE = localStorage.getItem('cqm_sign_image') || '';
@@ -1066,7 +1068,7 @@ function fbAuthErrorMessage(e){
     'auth/missing-password': '비밀번호를 입력하세요.',
     'auth/weak-password': '비밀번호는 6자 이상이어야 합니다.',
     'auth/email-already-in-use': '이미 등록된 이메일입니다. [이메일로 로그인]을 이용하세요.',
-    'auth/user-not-found': '등록되지 않은 이메일입니다. [계정 만들기]로 먼저 등록하세요.',
+    'auth/user-not-found': '등록되지 않은 이메일입니다. 관리자에게 계정 생성을 요청하세요.',
     'auth/wrong-password': '비밀번호가 일치하지 않습니다.',
     'auth/invalid-credential': '이메일 또는 비밀번호가 일치하지 않습니다.',
     'auth/operation-not-allowed': 'Firebase 콘솔에서 이메일/비밀번호 로그인이 아직 사용 설정되지 않았습니다.',
@@ -1076,15 +1078,8 @@ function fbAuthErrorMessage(e){
   };
   return MAP[code] || (e && e.message) || String(e);
 }
-function fbEmailSignUp(){
-  const email = $('fbEmailInput').value.trim();
-  const pw = $('fbPasswordInput').value;
-  const msg = $('fbEmailAuthMsg');
-  if(!email || !pw){ msg.textContent = '이메일과 비밀번호를 모두 입력하세요.'; return; }
-  firebase.auth().createUserWithEmailAndPassword(email, pw)
-    .then(()=>{ closeModal('modal-signer-auth'); })
-    .catch(e=>{ console.error(e); msg.textContent = fbAuthErrorMessage(e); });
-}
+/* 이메일/비밀번호 자율 가입(계정 만들기)은 제공하지 않습니다. 이메일 계정은 관리자가 Firebase 콘솔에서
+   직접 생성해야 하며, 해당 사용자는 [비밀번호를 잊으셨나요?]로 본인 비밀번호를 설정한 뒤 아래 로그인으로 접속합니다. */
 function fbEmailSignIn(){
   const email = $('fbEmailInput').value.trim();
   const pw = $('fbPasswordInput').value;
@@ -1516,10 +1511,9 @@ $('saveClientIdBtn').addEventListener('click', async ()=>{
     }
   }
 
-  const newFolderName = $('folderNameInput').value.trim() || '교정품질관리';
+  // 저장 폴더 이름(ROOT_FOLDER_NAME)은 파일마다 코드에 고정되어 있으며 여기서 바꾸지 않습니다.
   const newParentId = extractFolderId($('parentFolderInput').value);
-  const changedLocation = (newFolderName !== ROOT_FOLDER_NAME) || (newParentId !== PARENT_FOLDER_ID);
-  ROOT_FOLDER_NAME = newFolderName; localStorage.setItem('cqm_folder_name', newFolderName);
+  const changedLocation = (newParentId !== PARENT_FOLDER_ID);
   PARENT_FOLDER_ID = newParentId; localStorage.setItem('cqm_parent_folder_id', newParentId);
   CC_API_KEY = $('ccApiKeyInput').value.trim(); localStorage.setItem('cqm_cc_api_key', CC_API_KEY);
 
@@ -1540,7 +1534,6 @@ window.addEventListener('load', ()=>{
 $('fbSignInBtn').addEventListener('click', fbSignIn);
 $('gateSignInBtn').addEventListener('click', fbSignIn);
 $('fbGoogleSignInBtn').addEventListener('click', fbGoogleSignIn);
-$('fbEmailSignUpBtn').addEventListener('click', fbEmailSignUp);
 $('fbEmailSignInBtn').addEventListener('click', fbEmailSignIn);
 $('fbForgotPwBtn').addEventListener('click', fbForgotPassword);
 $('changePwSettingsBtn').addEventListener('click', openChangePasswordModal);
