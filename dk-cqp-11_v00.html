@@ -573,6 +573,13 @@
       </div>
       <div class="hint">이미 등록된 기록의 서명 상태에는 영향을 주지 않고, 이후 새로 등록되는 기록부터 적용됩니다.</div>
     </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:400;">
+        <input type="checkbox" id="tplEditPersonalInfo" style="width:auto;">
+        개인정보 포함
+      </label>
+      <div class="hint">체크하면 이 양식의 작성 기록은 기술책임자·품질책임자·최고경영자·최상위 관리자에게는 등록된 모든 기록이 보이고, 교정실무자에게는 본인이 등록한 기록만 보입니다.</div>
+    </div>
     <div class="modal-actions">
       <button class="btn" data-close>취소</button>
       <button class="btn btn-primary" id="saveTplEditBtn">저장</button>
@@ -793,7 +800,10 @@ const $ = (id) => document.getElementById(id);
 
 /* ========================= 상태/설정 ========================= */
 
-let ROOT_FOLDER_NAME = localStorage.getItem('cqm_folder_name') || 'DK-CQP-11';
+/* 이 파일 전용 고정 저장 폴더명입니다. 26개 절차서 파일이 같은 브라우저(같은 origin)에서 열리면
+   localStorage를 공유하므로, 예전에 다른 절차서 파일에서 저장한 값이 섞여 들어올 수 있습니다.
+   그런 문제를 막기 위해 localStorage를 참조하지 않고 이 값을 항상 그대로 사용합니다. */
+let ROOT_FOLDER_NAME = 'DK-CQP-11';
 let PARENT_FOLDER_ID = localStorage.getItem('cqm_parent_folder_id') || '';
 
 let SIGN_IMAGE = localStorage.getItem('cqm_sign_image') || '';
@@ -1509,10 +1519,9 @@ $('saveClientIdBtn').addEventListener('click', async ()=>{
     }
   }
 
-  const newFolderName = $('folderNameInput').value.trim() || '교정품질관리';
+  // 저장 폴더 이름(ROOT_FOLDER_NAME)은 파일마다 코드에 고정되어 있으며 여기서 바꾸지 않습니다.
   const newParentId = extractFolderId($('parentFolderInput').value);
-  const changedLocation = (newFolderName !== ROOT_FOLDER_NAME) || (newParentId !== PARENT_FOLDER_ID);
-  ROOT_FOLDER_NAME = newFolderName; localStorage.setItem('cqm_folder_name', newFolderName);
+  const changedLocation = (newParentId !== PARENT_FOLDER_ID);
   PARENT_FOLDER_ID = newParentId; localStorage.setItem('cqm_parent_folder_id', newParentId);
   CC_API_KEY = $('ccApiKeyInput').value.trim(); localStorage.setItem('cqm_cc_api_key', CC_API_KEY);
 
@@ -1973,6 +1982,7 @@ window.openTplEdit = (tplId)=>{
   $('tplEditFlowNone').checked = (flow === 'none');
   $('tplEditFlowSelf').checked = (flow === 'self');
   ROLE_ORDER.forEach(r=> $(TPL_EDIT_FLOW_ROLE_IDS[r]).checked = (Array.isArray(flow) && flow.includes(r)));
+  $('tplEditPersonalInfo').checked = !!t.personalInfo;
   openModal('modal-tpl-edit');
 };
 /* 문구 수정 모달의 결재선 체크박스: 등록 모달과 동일하게 '서명 없음'/'각자 서명'과 역할 선택은 상호 배타적이며, 최대 3개까지 선택 가능 */
@@ -2002,6 +2012,7 @@ $('saveTplEditBtn').addEventListener('click', async ()=>{
   const signFlow = getCheckedTplEditFlow();
   if(Array.isArray(signFlow) && signFlow.length === 0){ toast('결재선을 선택하세요 (역할 1~3개, 서명 없음, 또는 각자 서명)'); return; }
   t.name = name; t.code = $('tplEditCode').value.trim(); t.signFlow = signFlow;
+  t.personalInfo = $('tplEditPersonalInfo').checked;
   const dateStr = $('tplEditDate').value || todayStr();
   closeModal('modal-tpl-edit');
   setSync('busy','저장 중...');
@@ -2108,8 +2119,21 @@ window.deleteTemplate = async (tplId)=>{
 function matchesCurrentTab(r){
   return r.templateId === currentTab;
 }
+/* 개인정보 포함 양식의 작성 기록 열람 제한:
+   - 연결된 양식이 [양식 정보 수정]에서 "개인정보 포함"으로 표시된 경우에만 적용된다.
+   - 기술책임자(reviewer)/품질책임자(approver)/최고경영자(manager)/최상위 관리자(master)는 등록된 모든 기록을 본다.
+   - 교정실무자(author)는 본인이 등록한 기록만 본다.
+   - 개인정보 포함으로 표시되지 않은 양식은 기존과 동일하게 모두에게 보인다. */
+function canViewRecord(r){
+  const t = getTpl(r.templateId);
+  if(!t || !t.personalInfo) return true;
+  if(isAdminUser(fbUser)) return true; // master(최상위 관리자)
+  const role = fbProfile && fbProfile.role;
+  if(role && role !== 'author') return true; // reviewer/approver/manager
+  return !!(fbUser && r.createdByUid && r.createdByUid === fbUser.uid); // author, 또는 역할 미지정
+}
 function allYears(){
-  const relevant = state.records.filter(matchesCurrentTab);
+  const relevant = state.records.filter(r=> matchesCurrentTab(r) && canViewRecord(r));
   const ys = new Set(relevant.map(r=>r.year));
   ys.add(new Date().getFullYear());
   return [...ys].sort((a,b)=>b-a);
@@ -2129,7 +2153,7 @@ function getRecordFiles(r){
 }
 function renderRecords(){
   const recs = state.records
-    .filter(r=> r.year===currentYear && matchesCurrentTab(r))
+    .filter(r=> r.year===currentYear && matchesCurrentTab(r) && canViewRecord(r))
     .sort((a,b)=> new Date(b.createdAt)-new Date(a.createdAt));
   $('recCount').textContent = `${currentYear}년 · ${recs.length}건`;
   const host = $('recordsHost');

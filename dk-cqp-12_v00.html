@@ -332,7 +332,7 @@
     <p class="sub">Firebase 설정을 등록하면 로그인/문서 저장이 모두 이 프로젝트로 연결됩니다.</p>
     <div class="field">
       <label>저장 폴더 이름</label>
-      <input type="text" id="folderNameInput" placeholder="DK-CQP-19" disabled>
+      <input type="text" id="folderNameInput" placeholder="DK-CQP-12" disabled>
       <div class="hint">Firebase Storage 안에 생성될 최상위 경로 이름입니다. (고정된 이름이며 변경할 수 없습니다)</div>
     </div>
     <div class="field">
@@ -803,7 +803,7 @@ const $ = (id) => document.getElementById(id);
 /* 이 파일 전용 고정 저장 폴더명입니다. 26개 절차서 파일이 같은 브라우저(같은 origin)에서 열리면
    localStorage를 공유하므로, 예전에 다른 절차서 파일에서 저장한 값이 섞여 들어올 수 있습니다.
    그런 문제를 막기 위해 localStorage를 참조하지 않고 이 값을 항상 그대로 사용합니다. */
-let ROOT_FOLDER_NAME = 'DK-CQP-19';
+let ROOT_FOLDER_NAME = 'DK-CQP-12';
 let PARENT_FOLDER_ID = localStorage.getItem('cqm_parent_folder_id') || '';
 
 let SIGN_IMAGE = localStorage.getItem('cqm_sign_image') || '';
@@ -1283,7 +1283,7 @@ if(window.pdfjsLib){
 
 let rootFolderId = null, templatesFolderId = null, recordsFolderId = null, metadataFileId = null;
 let storageInstance = null; /* Firebase Storage 인스턴스. rootFolderId/templatesFolderId/recordsFolderId/metadataFileId/fileId 값들은
-   이제 Google Drive 파일 ID가 아니라 Storage 안의 "경로 문자열"로 사용됩니다 (예: 'DK-CQP-19/templates/2026_교정절차서'). */
+   이제 Google Drive 파일 ID가 아니라 Storage 안의 "경로 문자열"로 사용됩니다 (예: 'DK-CQP-12/templates/2026_교정절차서'). */
 let CC_API_KEY = localStorage.getItem('cqm_cc_api_key') || '';
 let state = { templates: [], records: [] };
 async function getRecordYearFolder(templateId, year){
@@ -1554,8 +1554,8 @@ $('signOutBtn').addEventListener('click', ()=>{ fbSignOut(); location.reload(); 
 /* ========================= Storage API 헬퍼 (구 Drive API 자리 대체) =========================
    과거 Google Drive API로 구현되어 있던 부분을 Firebase Storage로 교체했습니다.
    Drive의 "폴더 ID"/"파일 ID" 개념 대신, Storage 안의 "경로 문자열"을 그대로 id처럼 사용합니다.
-   예: rootFolderId = 'DK-CQP-19', templatesFolderId = 'DK-CQP-19/templates',
-       파일 하나의 fileId = 'DK-CQP-19/templates/2026_교정절차서/서식_v1.pdf' */
+   예: rootFolderId = 'DK-CQP-12', templatesFolderId = 'DK-CQP-12/templates',
+       파일 하나의 fileId = 'DK-CQP-12/templates/2026_교정절차서/서식_v1.pdf' */
 function getStorageRef(path){
   if(!storageInstance) throw new Error('Firebase Storage가 초기화되지 않았습니다');
   return storageInstance.ref(path);
