@@ -800,7 +800,10 @@ const $ = (id) => document.getElementById(id);
 
 /* ========================= 상태/설정 ========================= */
 
-let ROOT_FOLDER_NAME = localStorage.getItem('cqm_folder_name') || 'DK-CQP-02';
+/* 이 파일 전용 고정 저장 폴더명입니다. 26개 절차서 파일이 같은 브라우저(같은 origin)에서 열리면
+   localStorage를 공유하므로, 예전에 다른 절차서 파일에서 저장한 값이 섞여 들어올 수 있습니다.
+   그런 문제를 막기 위해 localStorage를 참조하지 않고 이 값을 항상 그대로 사용합니다. */
+let ROOT_FOLDER_NAME = 'DK-CQP-02';
 let PARENT_FOLDER_ID = localStorage.getItem('cqm_parent_folder_id') || '';
 
 let SIGN_IMAGE = localStorage.getItem('cqm_sign_image') || '';
@@ -1516,10 +1519,9 @@ $('saveClientIdBtn').addEventListener('click', async ()=>{
     }
   }
 
-  const newFolderName = $('folderNameInput').value.trim() || '교정품질관리';
+  // 저장 폴더 이름(ROOT_FOLDER_NAME)은 파일마다 코드에 고정되어 있으며 여기서 바꾸지 않습니다.
   const newParentId = extractFolderId($('parentFolderInput').value);
-  const changedLocation = (newFolderName !== ROOT_FOLDER_NAME) || (newParentId !== PARENT_FOLDER_ID);
-  ROOT_FOLDER_NAME = newFolderName; localStorage.setItem('cqm_folder_name', newFolderName);
+  const changedLocation = (newParentId !== PARENT_FOLDER_ID);
   PARENT_FOLDER_ID = newParentId; localStorage.setItem('cqm_parent_folder_id', newParentId);
   CC_API_KEY = $('ccApiKeyInput').value.trim(); localStorage.setItem('cqm_cc_api_key', CC_API_KEY);
 
