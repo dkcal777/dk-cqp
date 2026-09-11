@@ -381,6 +381,11 @@
       <div class="hint" id="markerHint">위에서부터 교정실무자 / 기술책임자 / 품질책임자 / 최고경영자 위치 문구입니다. 작성 파일(PDF·엑셀) 안에 이 문구를 각각 미리 적어두세요. 서명 버튼을 누르면 로그인한 사람의 역할에 해당하는 문구 위치에만 그 사람 본인의 서명 이미지가 삽입됩니다.</div>
     </div>
     <div class="field">
+      <label>확인 서명 표시 문구 <span style="font-weight:400;color:var(--ink-faint);">("확인 서명" 양식 전용, 결재선과 무관)</span></label>
+      <input type="text" id="markerConfirmInput" placeholder="예: (열람확인)">
+      <div class="hint">"확인 서명"이 켜진 양식의 회람·열람확인표 등에 이 문구를 미리 적어두면, 확인 서명 시 그 위치 근처로 자동 이동합니다. 문구가 여러 곳에 있어도 되며(이름별로 한 번씩), 실제 위치는 각자 본인 이름 옆으로 직접 옮겨서 서명합니다. 기술책임자 마커(위 두 번째 칸)와 같은 문구를 쓰지 않도록 주의하세요.</div>
+    </div>
+    <div class="field">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:400;">
         <input type="checkbox" id="lockSignDateInput" style="width:auto;">
         서명 일자 변경 불가능
@@ -578,6 +583,13 @@
         개인정보 포함
       </label>
       <div class="hint">체크하면 이 양식의 작성 기록은 기술책임자·품질책임자·최고경영자·최상위 관리자에게는 등록된 모든 기록이 보이고, 교정실무자에게는 본인이 등록한 기록만 보입니다.</div>
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:400;">
+        <input type="checkbox" id="tplEditConfirmSign" style="width:auto;">
+        확인 서명
+      </label>
+      <div class="hint">체크하면 결재선과는 별도로, 로그인한 사람이 각자 기록마다 "확인 서명"을 추가할 수 있습니다. 결재선(작성·확인·승인 등)은 이 설정과 무관하게 원래 규칙대로 그대로 진행되며, 확인 서명은 그와 별개로 "확인했다"는 서명을 더 남기는 용도입니다. 날짜는 표시되지 않고 서명 이미지만 들어가며, 같은 사람이 같은 기록에 두 번 서명할 수는 없습니다.</div>
     </div>
     <div class="modal-actions">
       <button class="btn" data-close>취소</button>
@@ -808,6 +820,7 @@ let PARENT_FOLDER_ID = localStorage.getItem('cqm_parent_folder_id') || '';
 let SIGN_IMAGE = localStorage.getItem('cqm_sign_image') || '';
 let SIGN_MARKER = localStorage.getItem('cqm_sign_marker') || '(서명)';
 let SIGN_ROLE_KEY = null; // 이번 서명이 완료되면 r.signRoles에 기록할 키 (역할명 또는 'self')
+let CONFIRM_SIGN_MODE = false; // true면 결재선과 무관한 '확인 서명' 진행 중 (r.confirmSigns에 기록, 날짜 없음)
 /* 서명 일자 변경 불가능 설정: 로컬 저장이 아니라 Firestore settings/global 문서에 저장되며,
    최상위 관리자(master)만 변경할 수 있다. 로그인 시 loadGlobalSettings()로 불러온다. */
 let LOCK_SIGN_DATE = false;
@@ -831,6 +844,9 @@ let ROLE_MARKERS = {
   approver: localStorage.getItem('cqm_marker_approver') || '(승인서명)',
   manager: localStorage.getItem('cqm_marker_manager') || '(최고경영자서명)'
 };
+/* '확인 서명'(양식별 개별 열람 확인, 결재선과 무관) 전용 표시 문구.
+   기술책임자 마커 기본값인 '(확인서명)'과 겹치지 않도록 기본값을 다르게 둔다. */
+let CONFIRM_SIGN_MARKER = localStorage.getItem('cqm_marker_confirm') || '(열람확인)';
 /* 기본 Firebase 설정 (하드코딩) - 기기/브라우저별로 다시 입력할 필요 없이 항상 이 값을 사용합니다.
    [설정]에서 다른 값을 저장하면 localStorage 값이 우선 적용됩니다. */
 const DEFAULT_FB_CONFIG = {
@@ -975,6 +991,7 @@ async function loadGlobalSettings(){
     ROLE_MARKERS.reviewer = data.markerReviewer || ROLE_MARKERS.reviewer;
     ROLE_MARKERS.approver = data.markerApprover || ROLE_MARKERS.approver;
     ROLE_MARKERS.manager = data.markerManager || ROLE_MARKERS.manager;
+    CONFIRM_SIGN_MARKER = data.markerConfirm || CONFIRM_SIGN_MARKER;
   }catch(e){
     console.error('서명 위치 문구 설정을 불러오지 못했습니다', e);
   }
@@ -1021,17 +1038,19 @@ async function saveMarkerSettings(markers){
     await firebase.firestore().collection('settings').doc('markers').set(
       {
         markerAuthor: markers.author, markerReviewer: markers.reviewer, markerApprover: markers.approver, markerManager: markers.manager,
+        markerConfirm: markers.confirm,
         updatedAt: new Date().toISOString(), updatedBy: fbUser.email||''
       }, { merge:true }
     );
     const check = await firebase.firestore().collection('settings').doc('markers').get({ source: 'server' }).catch(()=>null);
     const d = check && check.exists ? check.data() : null;
-    const persisted = !!(d && d.markerAuthor===markers.author && d.markerReviewer===markers.reviewer && d.markerApprover===markers.approver && d.markerManager===markers.manager);
+    const persisted = !!(d && d.markerAuthor===markers.author && d.markerReviewer===markers.reviewer && d.markerApprover===markers.approver && d.markerManager===markers.manager && d.markerConfirm===markers.confirm);
     if(!persisted){
       toast('서명 위치 표시 문구 저장이 서버에 반영되지 않았습니다. Firestore 보안 규칙을 확인해 주세요.');
       return false;
     }
     ROLE_MARKERS.author = markers.author; ROLE_MARKERS.reviewer = markers.reviewer; ROLE_MARKERS.approver = markers.approver; ROLE_MARKERS.manager = markers.manager;
+    CONFIRM_SIGN_MARKER = markers.confirm;
     return true;
   }catch(e){
     console.error(e);
@@ -1446,6 +1465,7 @@ $('settingsBtn').addEventListener('click', ()=>{
   $('markerReviewerInput').value = ROLE_MARKERS.reviewer;
   $('markerApproverInput').value = ROLE_MARKERS.approver;
   $('markerManagerInput').value = ROLE_MARKERS.manager;
+  $('markerConfirmInput').value = CONFIRM_SIGN_MARKER;
   $('markerHint').textContent = '위에서부터 교정실무자 / 기술책임자 / 품질책임자 / 최고경영자 위치 문구입니다. 작성 파일(PDF·엑셀) 안에 이 문구를 각각 미리 적어두세요. 서명 버튼을 누르면 로그인한 사람의 역할에 해당하는 문구 위치에만 그 사람 본인의 서명 이미지가 삽입됩니다. 이 설정은 Firestore에 저장되어 모든 서명자에게 동일하게 적용되며, 로그인한 서명자 누구나 변경할 수 있습니다.';
   $('lockSignDateInput').checked = LOCK_SIGN_DATE;
   $('lockSignDateInput').disabled = !isAdminUser(fbUser);
@@ -1480,15 +1500,17 @@ $('saveClientIdBtn').addEventListener('click', async ()=>{
       author: $('markerAuthorInput').value.trim() || '(작성서명)',
       reviewer: $('markerReviewerInput').value.trim() || '(확인서명)',
       approver: $('markerApproverInput').value.trim() || '(승인서명)',
-      manager: $('markerManagerInput').value.trim() || '(최고경영자서명)'
+      manager: $('markerManagerInput').value.trim() || '(최고경영자서명)',
+      confirm: $('markerConfirmInput').value.trim() || '(열람확인)'
     };
-    if(wantMarkers.author !== ROLE_MARKERS.author || wantMarkers.reviewer !== ROLE_MARKERS.reviewer || wantMarkers.approver !== ROLE_MARKERS.approver || wantMarkers.manager !== ROLE_MARKERS.manager){
+    if(wantMarkers.author !== ROLE_MARKERS.author || wantMarkers.reviewer !== ROLE_MARKERS.reviewer || wantMarkers.approver !== ROLE_MARKERS.approver || wantMarkers.manager !== ROLE_MARKERS.manager || wantMarkers.confirm !== CONFIRM_SIGN_MARKER){
       const ok = await saveMarkerSettings(wantMarkers);
       if(!ok){
         $('markerAuthorInput').value = ROLE_MARKERS.author;
         $('markerReviewerInput').value = ROLE_MARKERS.reviewer;
         $('markerApproverInput').value = ROLE_MARKERS.approver;
         $('markerManagerInput').value = ROLE_MARKERS.manager;
+        $('markerConfirmInput').value = CONFIRM_SIGN_MARKER;
       }
     }
   }
@@ -1974,6 +1996,7 @@ window.openTplEdit = (tplId)=>{
   $('tplEditFlowSelf').checked = (flow === 'self');
   ROLE_ORDER.forEach(r=> $(TPL_EDIT_FLOW_ROLE_IDS[r]).checked = (Array.isArray(flow) && flow.includes(r)));
   $('tplEditPersonalInfo').checked = !!t.personalInfo;
+  $('tplEditConfirmSign').checked = !!t.confirmSign;
   openModal('modal-tpl-edit');
 };
 /* 문구 수정 모달의 결재선 체크박스: 등록 모달과 동일하게 '서명 없음'/'각자 서명'과 역할 선택은 상호 배타적이며, 최대 3개까지 선택 가능 */
@@ -2004,6 +2027,7 @@ $('saveTplEditBtn').addEventListener('click', async ()=>{
   if(Array.isArray(signFlow) && signFlow.length === 0){ toast('결재선을 선택하세요 (역할 1~3개, 서명 없음, 또는 각자 서명)'); return; }
   t.name = name; t.code = $('tplEditCode').value.trim(); t.signFlow = signFlow;
   t.personalInfo = $('tplEditPersonalInfo').checked;
+  t.confirmSign = $('tplEditConfirmSign').checked;
   const dateStr = $('tplEditDate').value || todayStr();
   closeModal('modal-tpl-edit');
   setSync('busy','저장 중...');
@@ -2188,6 +2212,19 @@ function renderRecords(){
       } else {
         statusCellHtml = `${overallTag}<div style="margin-top:4px;">${flowRoles.map(roleBadgeHtml).join('')}</div>`;
       }
+      /* '확인 서명'(결재선과 무관한 개별 열람 확인): 양식에서 켜져 있을 때만 배지/버튼을 노출한다. */
+      const tplForConfirm = getTpl(r.templateId);
+      const confirmSignOn = !!(tplForConfirm && tplForConfirm.confirmSign);
+      const confirmList = r.confirmSigns || [];
+      const myConfirmed = !!(fbUser && confirmList.some(c=>c.uid===fbUser.uid));
+      if(confirmSignOn && confirmList.length){
+        const confirmTitle = confirmList.map(c=>`${c.name} · ${fmtDate(c.at)}`).join(', ');
+        statusCellHtml += `<div style="margin-top:4px;"><span class="tag outline" title="${escapeHtml(confirmTitle)}">확인서명 ${confirmList.length}명</span></div>`;
+      }
+      const confirmSignBtn = !confirmSignOn ? '' :
+        !fbUser ? `<button class="btn btn-sm" disabled title="로그인 후 확인 서명할 수 있습니다">확인 서명</button>`
+        : myConfirmed ? `<button class="btn btn-sm" disabled title="이미 확인 서명하셨습니다">확인 서명✓</button>`
+        : `<button class="btn btn-sm" onclick="openConfirmSign('${r.id}')">확인 서명</button>`;
       return `<tr>
         <td>${statusCellHtml}</td>
         <td>${isAdminUser(fbUser)
@@ -2203,6 +2240,7 @@ function renderRecords(){
           ${canManageFiles
             ? `<button class="btn btn-sm" onclick="openAddFileModal('${r.id}')">+ 파일 추가</button>`
             : `<button class="btn btn-sm" disabled title="서명 완료 기록은 최상위 관리자만 파일을 추가할 수 있습니다">+ 파일 추가</button>`}
+          ${confirmSignBtn}
           ${r.signedFileId ? (
             isFullySigned(r)
               ? (isAdminUser(fbUser) ? `<button class="btn btn-sm" onclick="openSignedModal('${r.id}')">서명본 교체</button>` : `<button class="btn btn-sm" disabled title="서명 완료 기록은 최상위 관리자만 교체할 수 있습니다">서명본 교체</button>`)
@@ -2568,6 +2606,17 @@ async function buildSignatureWithDate(dateText){
   }
   return { dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height };
 }
+/* '확인 서명'용: 날짜 없이 등록된 서명 이미지 그대로만 사용한다. */
+async function buildSignatureImageOnly(){
+  const img = await loadImageElement(SIGN_IMAGE);
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(img, 0, 0);
+  return { dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height };
+}
 function dataURLToBytes(dataUrl){
   const base64 = dataUrl.split(',')[1];
   const bin = atob(base64);
@@ -2617,6 +2666,39 @@ window.openRecordSign = (recId)=>{
   SIGN_ROLE_KEY = fbProfile && fbProfile.role;
   const f = files[0];
   return openAutoSign(recId, f.fileId, f.fileName);
+};
+
+/* '확인 서명': 결재선(작성/확인/승인/최고경영자)과 완전히 별개로, 로그인한 사람 누구나 본인 확인 서명을
+   추가로 남길 수 있는 기능이다. [양식 정보 수정]에서 "확인 서명"이 켜진 양식의 기록에만 노출된다.
+   - 결재선의 서명 순서/완료 여부와 무관하게 언제든 가능하다.
+   - 같은 사람이 같은 기록에 두 번 서명할 수 없다 (r.confirmSigns의 uid로 판별).
+   - 날짜는 삽입하지 않고 서명 이미지만 삽입하며, 결재선 서명본(r.signedFileId, 없으면 작성 파일)에 이어서 삽입한다.
+   - 표시 문구(CONFIRM_SIGN_MARKER)는 참고용 위치 찾기일 뿐이며, 최종 위치는 본인이 직접 이름 옆으로 옮겨서 서명한다. */
+window.openConfirmSign = (recId)=>{
+  const r = state.records.find(x=>x.id===recId);
+  if(!r) return;
+  if(!FB_CONFIG){ toast('설정에서 Firebase 설정을 먼저 등록하세요'); openModal('modal-settings'); return; }
+  if(!fbUser){ toast('먼저 [서명자 인증]으로 본인 인증을 진행하세요'); return; }
+  if(!fbProfile || !fbProfile.signatureImage){ toast('설정에서 본인 서명 이미지를 먼저 등록하세요'); $('settingsBtn').click(); return; }
+  if(r.confirmSigns && r.confirmSigns.some(c=>c.uid===fbUser.uid)){
+    toast('이미 확인 서명을 하셨습니다. 재서명은 할 수 없습니다');
+    return;
+  }
+  const files = getRecordFiles(r);
+  if(!files.length){ toast('첨부된 작성 파일이 없습니다. 먼저 파일을 추가해 주세요'); return; }
+  CONFIRM_SIGN_MODE = true;
+  SIGN_ROLE_KEY = null; // 확인 서명은 r.signRoles(결재선)에 기록하지 않는다
+  SIGN_MARKER = CONFIRM_SIGN_MARKER || '(열람확인)';
+  /* 이미 결재선 서명이 하나라도 진행되어 서명본이 있으면 그 서명본에 이어서, 없으면 원본 작성 파일에 삽입한다. */
+  const targetFileId = r.signedFileId ? r.signedFileId : files[0].fileId;
+  const targetFileName = r.signedFileId ? r.signedFileName : files[0].fileName;
+  if(isXlsxName(targetFileName)) return openAutoSignExcelModal(recId, targetFileId, targetFileName);
+  if(isHwpName(targetFileName)){
+    CONFIRM_SIGN_MODE = false;
+    toast('HWP 파일은 자동서명을 지원하지 않습니다. 한글에서 "PDF로 저장" 후 등록해 주세요.');
+    return;
+  }
+  return openAutoSignModal(recId, targetFileId, targetFileName);
 };
 
 /* '서명 없음' 결재선: 서명 이미지 삽입 없이, 승인자의 확인만으로 작성 파일을 그대로 서명본으로 등록한다. */
@@ -2677,9 +2759,12 @@ window.openAutoSign = (recordId, fileId, fileName) => {
 };
 
 window.openAutoSignModal = async (recordId, fileId, fileName) => {
+  /* 가드 절에서 조기 return 되더라도 전역 플래그가 다음 서명 작업에 잘못 이어지지 않도록, 함수 진입과 동시에 즉시 읽고 초기화한다. */
+  const confirmModeForThisCall = CONFIRM_SIGN_MODE;
+  CONFIRM_SIGN_MODE = false;
   if(!SIGN_IMAGE){ toast('설정에서 서명 이미지를 먼저 등록하세요'); $('settingsBtn').click(); return; }
   if(!window.pdfjsLib || !window.PDFLib){ toast('PDF 처리 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인하세요.'); return; }
-  AS = { recordId, fileId, fileName, pageIndex:0, matches:[], scale:1.3, pageWidthPt:0, pageHeightPt:0, overlay:null, imgNatural:null, signDateValue: todayDateInputValue() };
+  AS = { recordId, fileId, fileName, pageIndex:0, matches:[], scale:1.3, pageWidthPt:0, pageHeightPt:0, overlay:null, imgNatural:null, signDateValue: todayDateInputValue(), confirmMode: confirmModeForThisCall };
   $('autosignSub').textContent = `"${fileName}" 파일을 불러오는 중입니다...`;
   $('autosignBody').innerHTML = `<div class="empty" style="padding:30px;"><h3>불러오는 중...</h3></div>`;
   $('autosignApplyBtn').disabled = true;
@@ -2691,7 +2776,7 @@ window.openAutoSignModal = async (recordId, fileId, fileName) => {
     const loadingTask = pdfjsLib.getDocument({ data: buf.slice(0) });
     AS.pdfjsDoc = await loadingTask.promise;
     AS.numPages = AS.pdfjsDoc.numPages;
-    const built = await buildSignatureWithDate(formatSignDate(AS.signDateValue));
+    const built = AS.confirmMode ? await buildSignatureImageOnly() : await buildSignatureWithDate(formatSignDate(AS.signDateValue));
     AS.compositeDataUrl = built.dataUrl;
     AS.imgNatural = { w: built.width, h: built.height };
     await findMarkerMatches();
@@ -2741,9 +2826,11 @@ async function renderAutosignStage(){
   body.innerHTML = `
     <div class="autosign-toolbar">
       ${AS.numPages>1 ? `<label>페이지 <select id="asPageSel" style="margin-left:4px;"></select> / ${AS.numPages}</label>` : ''}
-      <span class="autosign-badge ${totalMatches?'found':'notfound'}">${totalMatches ? `표시 문구 '${escapeHtml(SIGN_MARKER)}' ${totalMatches}곳 발견` : `표시 문구를 찾지 못함 · 직접 위치를 지정하세요`}</span>
+      <span class="autosign-badge ${totalMatches?'found':'notfound'}">${totalMatches
+        ? `표시 문구 '${escapeHtml(SIGN_MARKER)}' ${totalMatches}곳 발견${AS.confirmMode ? ' · 본인 이름 옆으로 직접 옮기세요' : ''}`
+        : (AS.confirmMode ? `표시 문구를 찾지 못함 · 본인 이름 옆 빈 칸으로 직접 위치를 지정하세요` : `표시 문구를 찾지 못함 · 직접 위치를 지정하세요`)}</span>
       <span class="slider-wrap">크기 <input type="range" id="asSizeRange" min="40" max="400" value="60"><span id="asSizeVal">60px</span></span>
-      <span class="slider-wrap">서명일자 <input type="date" id="asDateInput" value="${AS.signDateValue}" ${LOCK_SIGN_DATE ? 'disabled title="설정에서 서명 일자 변경이 잠겨 있습니다"' : ''}></span>
+      ${AS.confirmMode ? '' : `<span class="slider-wrap">서명일자 <input type="date" id="asDateInput" value="${AS.signDateValue}" ${LOCK_SIGN_DATE ? 'disabled title="설정에서 서명 일자 변경이 잠겨 있습니다"' : ''}></span>`}
     </div>
     <div class="autosign-stage" id="asStage">
       <canvas id="asCanvas"></canvas>
@@ -2788,7 +2875,7 @@ async function renderAutosignStage(){
     applyOverlayStyle();
   });
 
-  $('asDateInput').addEventListener('change', async (e)=>{
+  if(!AS.confirmMode) $('asDateInput').addEventListener('change', async (e)=>{
     AS.signDateValue = e.target.value;
     const built = await buildSignatureWithDate(formatSignDate(AS.signDateValue));
     AS.compositeDataUrl = built.dataUrl;
@@ -2882,19 +2969,25 @@ $('autosignApplyBtn').addEventListener('click', async ()=>{
     const r = state.records.find(x=>x.id===asSnapshot.recordId);
     const yearFolderId = await getRecordYearFolder(r.templateId, r.year);
     if(r.signedFileId) await driveTrash(r.signedFileId);
-    applyFirstSignDateToRecord(r, isoFromDateInput(asSnapshot.signDateValue));
+    if(!asSnapshot.confirmMode) applyFirstSignDateToRecord(r, isoFromDateInput(asSnapshot.signDateValue));
     const asExt = getExt(asSnapshot.fileName) || 'pdf';
     const outName = `${r.title}_서명본_${ymdCompactFromIso(r.createdAt)}.${asExt}`;
     const blob = new Blob([outBytes], { type:'application/pdf' });
     const newFileId = await driveCreateFile(outName, yearFolderId, 'application/pdf', blob);
     r.signedFileId = newFileId; r.signedFileName = outName;
-    const signKey = SIGN_ROLE_KEY || (fbProfile && fbProfile.role);
-    if(signKey){
-      r.signRoles = r.signRoles || {};
-      r.signRoles[signKey] = { name: getSignerDisplayName(fbProfile, fbProfile.email), at: nowIso() };
+    if(asSnapshot.confirmMode){
+      /* '확인 서명'은 결재선(r.signRoles)과 무관하므로 별도 이력(r.confirmSigns)에만 기록한다. */
+      r.confirmSigns = r.confirmSigns || [];
+      r.confirmSigns.push({ uid: fbUser.uid, name: getSignerDisplayName(fbProfile, fbUser.email), at: nowIso() });
+    } else {
+      const signKey = SIGN_ROLE_KEY || (fbProfile && fbProfile.role);
+      if(signKey){
+        r.signRoles = r.signRoles || {};
+        r.signRoles[signKey] = { name: getSignerDisplayName(fbProfile, fbProfile.email), at: nowIso() };
+      }
     }
     await saveMetadata(); renderRecords();
-    toast('서명이 삽입되어 서명본으로 저장되었습니다');
+    toast(asSnapshot.confirmMode ? '확인 서명이 추가되었습니다' : '서명이 삽입되어 서명본으로 저장되었습니다');
   }catch(e){
     console.error(e);
     setSync('on', '동기화됨 · ' + new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}));
@@ -2944,9 +3037,12 @@ async function findExcelMarkerMatches(workbook, marker){
 }
 
 window.openAutoSignExcelModal = async (recordId, fileId, fileName) => {
+  /* 가드 절에서 조기 return 되더라도 전역 플래그가 다음 서명 작업에 잘못 이어지지 않도록, 함수 진입과 동시에 즉시 읽고 초기화한다. */
+  const confirmModeForThisCall = CONFIRM_SIGN_MODE;
+  CONFIRM_SIGN_MODE = false;
   if(!SIGN_IMAGE){ toast('설정에서 서명 이미지를 먼저 등록하세요'); $('settingsBtn').click(); return; }
   if(!window.ExcelJS){ toast('엑셀 처리 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인하세요.'); return; }
-  ASX = { recordId, fileId, fileName, matches:[], selected:0, width:90, signDateValue: todayDateInputValue(), printArea:'', sheetPrintAreas:{} };
+  ASX = { recordId, fileId, fileName, matches:[], selected:0, width:90, signDateValue: todayDateInputValue(), printArea:'', sheetPrintAreas:{}, confirmMode: confirmModeForThisCall };
   $('asxSub').textContent = `"${fileName}" 파일을 불러오는 중입니다...`;
   $('asxBody').innerHTML = `<div class="empty" style="padding:30px;"><h3>불러오는 중...</h3></div>`;
   $('asxApplyBtn').disabled = true;
@@ -2955,7 +3051,7 @@ window.openAutoSignExcelModal = async (recordId, fileId, fileName) => {
     const blob = await storageGetBlob(fileId);
     const buf = await blob.arrayBuffer();
     ASX.xlsxBytes = buf;
-    const built = await buildSignatureWithDate(formatSignDate(ASX.signDateValue));
+    const built = ASX.confirmMode ? await buildSignatureImageOnly() : await buildSignatureWithDate(formatSignDate(ASX.signDateValue));
     ASX.compositeDataUrl = built.dataUrl;
     ASX.imgNatural = { w: built.width, h: built.height };
     const workbook = new ExcelJS.Workbook();
@@ -2978,7 +3074,7 @@ function renderAsxBody(){
   if(!ASX.matches.length){
     body.innerHTML = `
       <div class="autosign-toolbar"><span class="autosign-badge notfound">표시 문구 '${escapeHtml(SIGN_MARKER)}'를 찾지 못했습니다</span></div>
-      <div class="hint">엑셀 시트 안에 '${escapeHtml(SIGN_MARKER)}' 문구가 정확히 들어있는 셀이 있는지 확인해 주세요. 설정에서 표시 문구를 바꿀 수도 있습니다.</div>`;
+      <div class="hint">엑셀 시트 안에 '${escapeHtml(SIGN_MARKER)}' 문구가 정확히 들어있는 셀이 있는지 확인해 주세요. 설정에서 표시 문구를 바꿀 수도 있습니다.${ASX.confirmMode ? ' (확인 서명용 회람표에 이름별로 이 문구를 한 번씩 적어두어야 합니다)' : ''}</div>`;
     $('asxSub').textContent = `"${ASX.fileName}"`;
     $('asxApplyBtn').disabled = true;
     return;
@@ -2986,7 +3082,7 @@ function renderAsxBody(){
 
   body.innerHTML = `
     <div class="autosign-toolbar" style="flex-direction:column;align-items:stretch;gap:10px;">
-      <span class="autosign-badge found">표시 문구 '${escapeHtml(SIGN_MARKER)}' ${ASX.matches.length}곳 발견</span>
+      <span class="autosign-badge found">표시 문구 '${escapeHtml(SIGN_MARKER)}' ${ASX.matches.length}곳 발견${ASX.confirmMode ? ' · 본인 이름이 있는 위치를 아래에서 고르세요' : ''}</span>
       <div class="field" style="margin:0;">
         <label style="font-size:12.5px;">삽입할 위치 선택</label>
         <div id="asxMatchList" style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto;">
@@ -3001,10 +3097,10 @@ function renderAsxBody(){
       <div class="slider-wrap">서명 폭(px) <input type="range" id="asxWidthRange" min="30" max="300" value="${ASX.width}"><span id="asxWidthVal">${ASX.width}px</span>
         <img src="${ASX.compositeDataUrl}" style="width:${ASX.width}px;height:${previewH}px;border:1px solid var(--border);border-radius:4px;background:#fff;padding:2px;margin-left:8px;">
       </div>
-      <div class="field" style="margin:0;">
+      ${ASX.confirmMode ? '' : `<div class="field" style="margin:0;">
         <label style="font-size:12.5px;">서명 일자 ${LOCK_SIGN_DATE ? '(변경 불가능)' : '(변경 가능)'}</label>
         <input type="date" id="asxDateInput" value="${ASX.signDateValue}" ${LOCK_SIGN_DATE ? 'disabled title="설정에서 서명 일자 변경이 잠겨 있습니다"' : ''}>
-      </div>
+      </div>`}
       <div class="field" style="margin:0;">
         <label style="font-size:12.5px;">인쇄 영역 (예: A1:M60 · 비워두면 시트 전체 인쇄)</label>
         <input type="text" id="asxPrintArea" placeholder="예: A1:M60" value="${escapeHtml(ASX.printArea||'')}">
@@ -3027,7 +3123,7 @@ function renderAsxBody(){
     $('asxWidthVal').textContent = ASX.width+'px';
     renderAsxBody();
   });
-  $('asxDateInput').addEventListener('change', async (e)=>{
+  if(!ASX.confirmMode) $('asxDateInput').addEventListener('change', async (e)=>{
     ASX.signDateValue = e.target.value;
     const built = await buildSignatureWithDate(formatSignDate(ASX.signDateValue));
     ASX.compositeDataUrl = built.dataUrl;
@@ -3085,18 +3181,23 @@ $('asxApplyBtn').addEventListener('click', async ()=>{
     const xlsxBlob = new Blob([outBuffer], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 
     if(r.signedFileId) await driveTrash(r.signedFileId);
-    applyFirstSignDateToRecord(r, isoFromDateInput(snap.signDateValue));
+    if(!snap.confirmMode) applyFirstSignDateToRecord(r, isoFromDateInput(snap.signDateValue));
     const outName = `${r.title}_서명본_${ymdCompactFromIso(r.createdAt)}.xlsx`;
     setSync('busy','업로드 중...');
     const newFileId = await driveCreateFile(outName, yearFolderId, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xlsxBlob);
     r.signedFileId = newFileId; r.signedFileName = outName;
-    const signKey = SIGN_ROLE_KEY || (fbProfile && fbProfile.role);
-    if(signKey){
-      r.signRoles = r.signRoles || {};
-      r.signRoles[signKey] = { name: getSignerDisplayName(fbProfile, fbProfile.email), at: nowIso() };
+    if(snap.confirmMode){
+      r.confirmSigns = r.confirmSigns || [];
+      r.confirmSigns.push({ uid: fbUser.uid, name: getSignerDisplayName(fbProfile, fbUser.email), at: nowIso() });
+    } else {
+      const signKey = SIGN_ROLE_KEY || (fbProfile && fbProfile.role);
+      if(signKey){
+        r.signRoles = r.signRoles || {};
+        r.signRoles[signKey] = { name: getSignerDisplayName(fbProfile, fbProfile.email), at: nowIso() };
+      }
     }
     await saveMetadata(); renderRecords();
-    toast('서명이 삽입되어 엑셀 서명본으로 저장되었습니다');
+    toast(snap.confirmMode ? '확인 서명이 추가되었습니다' : '서명이 삽입되어 엑셀 서명본으로 저장되었습니다');
   }catch(e){
     console.error(e);
     setSync('on', '동기화됨 · ' + new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}));
