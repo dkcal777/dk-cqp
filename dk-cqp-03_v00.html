@@ -493,6 +493,24 @@
   </div>
 </div>
 
+<!-- 승인 확인 모달 ('서명 없음 - 승인 확인만' 결재선 전용) -->
+<div class="overlay" id="modal-approver-confirm" style="z-index:200;">
+  <div class="modal" style="max-width:420px;">
+    <button class="modal-close" data-close>×</button>
+    <h3>승인 확인</h3>
+    <p class="sub" id="apOnlySub" style="white-space:pre-line;">이 기록을 확인 처리할까요?</p>
+    <div class="field">
+      <label>승인 일자</label>
+      <input type="date" id="apOnlyDateInput">
+      <div class="hint" id="apOnlyDateHint">이 날짜가 기록의 등록일에 반영됩니다.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" data-close>취소</button>
+      <button class="btn btn-primary" id="apOnlyConfirmBtn">확인하고 승인</button>
+    </div>
+  </div>
+</div>
+
 <!-- 양식 등록 모달 -->
 <div class="overlay" id="modal-tpl">
   <div class="modal">
@@ -2708,6 +2726,12 @@ function applyFirstSignDateToRecord(r, isoDateStr){
   const hadAnySignBefore = !!(r.signRoles && Object.keys(r.signRoles).length);
   if(!hadAnySignBefore && isoDateStr){ r.createdAt = isoDateStr; }
 }
+let apOnlyTargetId = null;
+/* '서명 없음(승인 확인만)' 결재선 전용: 서명 이미지 삽입 없이 승인자가 확인만 하는 흐름.
+   - 기록 등록 시 "상부 서명본 PDF"가 이미 첨부되어 있으면(r.signedFileId) 그 파일을 그대로 서명본으로 유지한다
+     (예전에는 이걸 지우고 작성 파일 복사본으로 덮어써 버리는 버그가 있었다).
+   - 상부 서명본이 없을 때만, 지금까지처럼 작성 파일을 그대로 복사해 서명본으로 등록한다.
+   - 승인 일자를 승인자가 직접 지정할 수 있고, 그 날짜가 기록의 등록일(createdAt)에 반영된다. */
 async function confirmApproverOnly(recId){
   const r = state.records.find(x=>x.id===recId);
   if(!r) return;
@@ -2716,18 +2740,41 @@ async function confirmApproverOnly(recId){
   if(!fbProfile || fbProfile.role !== 'approver'){ toast(`이 기록은 ${ROLE_LABELS.approver} 확인만으로 처리됩니다. ${ROLE_LABELS.approver} 권한 계정으로 로그인 후 진행해 주세요`); return; }
   if(r.signRoles && r.signRoles.approver){ toast('이미 승인 확인이 완료되었습니다'); return; }
   const files = getRecordFiles(r);
-  const f = files[0];
-  if(!confirm(`"${r.title}" 기록을 확인 처리할까요?\n서명 이미지 삽입 없이, "${f.fileName}" 파일이 그대로 서명본으로 등록됩니다.`)) return;
+  if(!files.length){ toast('첨부된 작성 파일이 없습니다. 먼저 파일을 추가해 주세요'); return; }
+  apOnlyTargetId = recId;
+  $('apOnlySub').textContent = r.signedFileId
+    ? `"${r.title}" 기록을 확인 처리할까요?\n이미 등록된 상부 서명본 파일("${r.signedFileName}")이 그대로 서명본으로 유지됩니다.`
+    : `"${r.title}" 기록을 확인 처리할까요?\n서명 이미지 삽입 없이, "${files[0].fileName}" 파일이 그대로 서명본으로 등록됩니다.`;
+  $('apOnlyDateInput').value = todayDateInputValue();
+  $('apOnlyDateInput').disabled = LOCK_SIGN_DATE;
+  $('apOnlyDateHint').textContent = LOCK_SIGN_DATE
+    ? '설정에서 서명 일자 변경이 잠겨 있어 오늘 날짜로만 승인됩니다.'
+    : '이 날짜가 승인 일자로 기록되고, 기록의 등록일에도 반영됩니다.';
+  openModal('modal-approver-confirm');
+}
+document.querySelectorAll('#modal-approver-confirm [data-close]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{ apOnlyTargetId = null; });
+});
+$('apOnlyConfirmBtn').addEventListener('click', async ()=>{
+  const r = state.records.find(x=>x.id===apOnlyTargetId);
+  if(!r){ closeModal('modal-approver-confirm'); return; }
+  const dateStr = LOCK_SIGN_DATE ? todayDateInputValue() : ($('apOnlyDateInput').value || todayDateInputValue());
+  apOnlyTargetId = null;
+  closeModal('modal-approver-confirm');
   setSync('busy','확인 처리 중...');
   try{
-    const yearFolderId = await getRecordYearFolder(r.templateId, r.year);
-    if(r.signedFileId) await driveTrash(r.signedFileId);
-    const firstSignIso = nowIso();
-    applyFirstSignDateToRecord(r, firstSignIso);
-    const fExt = getExt(f.fileName);
-    const outName = `${r.title}_서명본_${ymdCompactFromIso(r.createdAt)}` + (fExt ? `.${fExt}` : '');
-    const newFileId = await driveCopyFile(f.fileId, outName, yearFolderId);
-    r.signedFileId = newFileId; r.signedFileName = outName;
+    applyFirstSignDateToRecord(r, isoFromDateInput(dateStr));
+    if(!r.signedFileId){
+      /* 상부 서명본이 미리 등록되어 있지 않을 때만 작성 파일을 그대로 복사해 서명본으로 등록한다. */
+      const yearFolderId = await getRecordYearFolder(r.templateId, r.year);
+      const files = getRecordFiles(r);
+      const f = files[0];
+      const fExt = getExt(f.fileName);
+      const outName = `${r.title}_서명본_${ymdCompactFromIso(r.createdAt)}` + (fExt ? `.${fExt}` : '');
+      const newFileId = await driveCopyFile(f.fileId, outName, yearFolderId);
+      r.signedFileId = newFileId; r.signedFileName = outName;
+    }
+    /* r.signedFileId가 이미 있던 경우(상부 서명본 PDF 첨부)는 그대로 둔다 - 지우거나 덮어쓰지 않는다. */
     r.signRoles = r.signRoles || {};
     r.signRoles.approver = { name: getSignerDisplayName(fbProfile, fbProfile.email), at: nowIso() };
     await saveMetadata(); renderRecords();
@@ -2737,7 +2784,7 @@ async function confirmApproverOnly(recId){
     setSync('on', '동기화됨 · ' + new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}));
     toast('처리에 실패했습니다');
   }
-}
+});
 
 window.openAutoSign = (recordId, fileId, fileName) => {
   const marker = currentSignerMarker();
