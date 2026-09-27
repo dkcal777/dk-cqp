@@ -2241,9 +2241,12 @@ function renderRecords(){
         const confirmTitle = confirmList.map(c=>`${c.name} · ${fmtDate(c.at)}`).join(', ');
         statusCellHtml += `<div style="margin-top:4px;"><span class="tag outline" title="${escapeHtml(confirmTitle)}">확인서명 ${confirmList.length}명</span></div>`;
       }
+      /* 최종 승인권자(결재선 마지막 단계) 서명까지 모두 완료된 기록에는 확인 서명을 더 이상 추가할 수 없다.
+         (단, 완료 전에 이미 확인 서명을 남긴 사람에게는 그 이력을 계속 보여준다.) */
       const confirmSignBtn = !confirmSignOn ? '' :
-        !fbUser ? `<button class="btn btn-sm" disabled title="로그인 후 확인 서명할 수 있습니다">확인 서명</button>`
-        : myConfirmed ? `<button class="btn btn-sm" disabled title="이미 확인 서명하셨습니다">확인 서명✓</button>`
+        myConfirmed ? `<button class="btn btn-sm" disabled title="이미 확인 서명하셨습니다">확인 서명✓</button>`
+        : recFullySigned ? `<button class="btn btn-sm" disabled title="최종 승인권자 서명이 완료된 기록에는 확인 서명을 추가할 수 없습니다">확인 서명</button>`
+        : !fbUser ? `<button class="btn btn-sm" disabled title="로그인 후 확인 서명할 수 있습니다">확인 서명</button>`
         : `<button class="btn btn-sm" onclick="openConfirmSign('${r.id}')">확인 서명</button>`;
       return `<tr>
         <td>${statusCellHtml}</td>
@@ -2732,6 +2735,10 @@ window.openConfirmSign = (recId)=>{
   if(!fbProfile || !fbProfile.signatureImage){ toast('설정에서 본인 서명 이미지를 먼저 등록하세요'); $('settingsBtn').click(); return; }
   if(r.confirmSigns && r.confirmSigns.some(c=>c.uid===fbUser.uid)){
     toast('이미 확인 서명을 하셨습니다. 재서명은 할 수 없습니다');
+    return;
+  }
+  if(isFullySigned(r)){
+    toast('최종 승인권자 서명이 완료된 기록에는 확인 서명을 추가할 수 없습니다');
     return;
   }
   const files = getRecordFiles(r);
