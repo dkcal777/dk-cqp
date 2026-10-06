@@ -2272,7 +2272,7 @@ function renderRecords(){
           ${(r.signedFileId && isFullySigned(r)) ? `<button class="btn btn-sm" title="최종 서명본 출력" onclick="printSignedFile('${r.id}')">서명본 인쇄</button>` : ''}
           ${canDeleteRecord(r)
             ? `<button class="btn btn-sm btn-danger" onclick="deleteRecord('${r.id}')">삭제</button>`
-            : `<button class="btn btn-sm btn-danger" disabled title="${isFullySigned(r) ? '서명 완료 기록은 최상위 관리자만 삭제할 수 있습니다' : '작성자 서명 이후에는 결재선의 마지막 확인자 또는 최상위 관리자만 삭제할 수 있습니다'}">삭제</button>`}
+            : `<button class="btn btn-sm btn-danger" disabled title="${escapeHtml(deleteDeniedReason(r))}">삭제</button>`}
         </div></td>
       </tr>`;
     }).join('')}</tbody>
@@ -2301,18 +2301,26 @@ function isFullySigned(r){
 }
 /* 기록 삭제 권한:
    - 서명 완료(모든 역할 서명 끝)된 기록: 최상위 관리자만 삭제 가능 (기존과 동일)
-   - 작성자 서명이 이미 끝났지만 아직 전체 완료는 아닌 경우: 승인자 또는 최상위 관리자만 삭제 가능
-   - 그 외(아직 아무도 서명하지 않았거나 작성자도 서명 전): 기존처럼 누구나 삭제 가능 */
+   - 그 외(승인 완료 전): 기술책임자(reviewer), 품질책임자(approver), 또는 최상위 관리자는 언제나 삭제 가능
+   - 기록을 등록한 본인(r.createdByUid)이 '교정실무자(author)' 역할인 경우에는, 아직 기술책임자/품질책임자
+     중 누구의 서명도 없을 때까지만 삭제할 수 있다. 둘 중 하나라도 서명이 완료되면 등록자(교정실무자)는
+     더 이상 삭제할 수 없고, 그 이후로는 기술책임자/품질책임자/최상위 관리자만 삭제 가능하다. */
 function canDeleteRecord(r){
   if(isFullySigned(r)) return isAdminUser(fbUser);
-  const authorSigned = !!(r.signRoles && r.signRoles.author);
-  if(authorSigned){
-    if(isAdminUser(fbUser)) return true;
-    const flowRoles = getSignFlowRoles(r);
-    const finalRole = flowRoles[flowRoles.length-1];
-    return !!(fbProfile && fbProfile.role === finalRole);
+  if(isAdminUser(fbUser)) return true;
+  if(fbProfile && (fbProfile.role === 'reviewer' || fbProfile.role === 'approver')) return true;
+  if(fbProfile && fbProfile.role === 'author'){
+    const reviewOrApproveDone = !!(r.signRoles && (r.signRoles.reviewer || r.signRoles.approver));
+    if(reviewOrApproveDone) return false;
   }
-  return true;
+  return !!(fbUser && r.createdByUid && r.createdByUid === fbUser.uid);
+}
+/* canDeleteRecord(r)가 false일 때, 그 이유를 설명하는 안내 문구. 버튼 title과 toast 메시지에서 함께 사용한다. */
+function deleteDeniedReason(r){
+  if(isFullySigned(r)) return '서명 완료 기록은 최상위 관리자만 삭제할 수 있습니다';
+  const reviewOrApproveDone = !!(r.signRoles && (r.signRoles.reviewer || r.signRoles.approver));
+  if(reviewOrApproveDone) return '기술책임자 또는 품질책임자 서명이 완료된 기록은 등록자(교정실무자)가 삭제할 수 없습니다. 기술책임자, 품질책임자 또는 최상위 관리자에게 요청하세요.';
+  return '승인 완료 전에는 등록자 본인, 기술책임자, 품질책임자 또는 최상위 관리자만 삭제할 수 있습니다';
 }
 
 /* 반려(서명 단계 되돌리기): 기술책임자/품질책임자/최고경영자가 서명 위치 지정 화면에서 사용.
@@ -2595,7 +2603,7 @@ window.printSignedFile = async (recId)=>{
 window.deleteRecord = async (recId)=>{
   const r = state.records.find(x=>x.id===recId);
   if(!canDeleteRecord(r)){
-    toast(isFullySigned(r) ? '서명 완료된 기록은 최상위 관리자만 삭제할 수 있습니다' : '작성자 서명 이후에는 결재선의 마지막 확인자 또는 최상위 관리자만 삭제할 수 있습니다');
+    toast(deleteDeniedReason(r));
     return;
   }
   if(!confirm(`"${r.title}" 기록을 삭제할까요? 등록된 파일도 Drive 휴지통으로 이동합니다.`)) return;
