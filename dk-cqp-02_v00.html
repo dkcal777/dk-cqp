@@ -906,10 +906,12 @@ function initFirebaseIfConfigured(){
   try{
     if(!firebase.apps.length) firebase.initializeApp(FB_CONFIG);
     storageInstance = firebase.storage();
-    /* 기본값(LOCAL)은 창을 닫아도 로그인 상태가 계속 유지된다.
-       SESSION으로 바꾸면 이 브라우저 탭/창이 열려있는 동안만 로그인이 유지되고,
-       창을 닫으면(로그아웃 버튼을 안 눌러도) 자동으로 로그아웃된 상태로 다음에 열리게 된다. */
-    firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION)
+    /* LOCAL: 모든 DK-CQP-02~26 파일이 같은 Firebase 프로젝트(FB_CONFIG)를 쓰므로, 같은 브라우저에서
+       한 번만 로그인하면 어느 파일을 열어도(새 탭, 나중에 다시 열기, 브라우저 재시작 포함) 로그인 상태가
+       그대로 유지된다. 명시적으로 [로그아웃]을 누르기 전까지는 계속 로그인 상태이므로, 공용/공유 PC에서는
+       사용 후 반드시 로그아웃하도록 안내가 필요하다. (이전에는 탭을 닫으면 자동 로그아웃되는 SESSION
+       방식이었으나, 26개 파일 간 로그인 공유를 위해 LOCAL로 변경함.) */
+    firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL)
       .catch(e=> console.error('로그인 유지 방식 설정 실패', e))
       .finally(()=>{ firebase.auth().onAuthStateChanged(onFbAuthChanged); });
   }catch(e){ console.error('Firebase 초기화 실패', e); toast('Firebase 설정을 확인해 주세요: ' + (e.message||e)); }
